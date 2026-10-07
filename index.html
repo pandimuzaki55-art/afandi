@@ -1,0 +1,350 @@
+<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>N5–N1</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5f9;color:#172033;font:15px system-ui,Arial}header{background:#111827;color:#fff;padding:18px;position:sticky;top:0;z-index:5}h1{margin:0 0 4px}.sub{opacity:.78}nav{display:flex;gap:7px;flex-wrap:wrap;margin-top:13px}button,input,select{font:inherit}button{border:0;border-radius:9px;padding:10px 13px;cursor:pointer;background:#e8ebf2}button.active,.primary{background:#2563eb;color:#fff}main{max-width:1120px;margin:auto;padding:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:#fff;border:1px solid #e4e7ec;border-radius:15px;padding:16px;box-shadow:0 2px 8px #00000008}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.muted{color:#667085}.pill{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:99px;padding:4px 8px;font-size:12px;font-weight:700}.big{font-size:65px;text-align:center;font-weight:800}.kana{font-size:28px;text-align:center;background:#f8fafc;padding:14px;border-radius:10px}.table{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:7px}.progress{height:11px;background:#e5e7eb;border-radius:99px;overflow:hidden}.bar{height:100%;background:#2563eb}.option{display:block;width:100%;text-align:left;margin:8px 0;border:2px solid transparent;background:#f8fafc}.option.correct{background:#dcfce7;border-color:#22c55e}.option.wrong{background:#fee2e2;border-color:#ef4444}.stat{font-size:30px;font-weight:800}.ok{background:#ecfdf5;padding:10px;border-radius:10px}.warn{background:#fff7ed;padding:10px;border-radius:10px}.formula{font-size:23px;background:#f8fafc;padding:12px;border-radius:10px;text-align:center}.ja{font-size:20px}.day{padding:8px;background:#f8fafc;border-radius:9px}.source{font-size:12px;color:#667085}.fw{max-width:720px;margin:0 auto}.fcard{min-height:330px;display:flex;align-items:center;justify-content:center;text-align:center;cursor:pointer;border:2px solid #dbe3ef}.ff{font-size:86px;font-weight:900}.fword{font-size:52px;font-weight:900}.fb{font-size:22px;line-height:1.55}.fcc{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px}.stroke{max-width:280px;width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:10px}
+</style></head><body>
+<header><h1>🇯🇵 N5–N1</h1><div class="sub">Hiragana → Katakana → Kanji → Kosakata → Grammar</div><div class="row" id="mode" style="margin-top:12px"></div><nav id="nav"></nav></header><main id="app"></main>
+<script>
+const LV=['N5','N4','N3','N2','N1'],KEY='jm_all_v1',$=s=>document.getElementById(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const shuf=a=>[...a].sort(()=>Math.random()-.5);
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const fmt=d=>new Date(d+'T00:00:00').toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+let level='N5',page='home',data={kanji:[],vocab:[]},dataMsg='Memuat data...',wk=[],wkMsg='',vs='wk';
+let st;try{st=JSON.parse(localStorage.getItem(KEY))||{}}catch(e){st={}}
+st={total:0,correct:0,sessions:0,today:0,day:'',streak:0,goal:10,days:{},rv:{},mode:'id',...st};
+const save=()=>localStorage.setItem(KEY,JSON.stringify(st));
+let M=st.mode||'id';
+/* ---- Terjemahan Inggris → Indonesia (otomatis, disimpan di perangkat) ---- */
+let tr={},tried=new Set();try{tr=JSON.parse(localStorage.getItem('jm_tr')||'{}')}catch(e){}
+const mt=x=>Array.isArray(x.meanings)?x.meanings.slice(0,3).join('; '):String(x.meanings||'');
+const mean=x=>x.src==='wk'?mt(x):(tr[mt(x)]||mt(x));
+async function trans(t){try{const r=await fetch('https://api.mymemory.translated.net/get?langpair=en|id&q='+encodeURIComponent(t));const j=await r.json(),o=j.responseData&&j.responseData.translatedText;if(o&&+j.responseStatus===200&&!/MYMEMORY|QUERY LENGTH/i.test(o))tr[t]=o.toLowerCase()}catch(e){}}
+async function trAll(items){const ts=[...new Set(items.filter(x=>x.src!=='wk').map(mt).filter(t=>t&&!tr[t]&&!tried.has(t)))];ts.forEach(t=>tried.add(t));
+ for(let i=0;i<ts.length;i+=4)await Promise.all(ts.slice(i,i+4).map(trans));
+ try{localStorage.setItem('jm_tr',JSON.stringify(tr))}catch(e){}return ts.length}
+const lazyTr=items=>trAll(items).then(n=>{if(n)render()});
+
+/* ---- Data (hanya bahasa Jepang: kanji + onyomi/kunyomi, kosakata + bacaan) ---- */
+const toK=s=>String(s||'').replace(/[ぁ-ゖ]/g,c=>String.fromCharCode(c.charCodeAt(0)+96));
+async function fj(p){for(const b of ['https://cdn.jsdelivr.net/gh/evanclan/OpenJLPT@main/data/json/','https://raw.githubusercontent.com/evanclan/OpenJLPT/main/data/json/']){try{const r=await fetch(b+p);if(r.ok)return await r.json()}catch(e){}}return[]}
+async function loadOnline(){
+ const res=await Promise.all(LV.flatMap(l=>[fj('kanji/'+l.toLowerCase()+'.json'),fj('vocab/'+l.toLowerCase()+'.json')].map(p=>p.then(a=>a.map(x=>({...x,level:x.level||l}))))));
+ let ks=res.filter((_,i)=>i%2===0).flat(),vv=res.filter((_,i)=>i%2===1).flat();
+ try{const r=await fetch('https://cdn.jsdelivr.net/gh/davidluzgouveia/kanji-data@master/kanji.json');
+  if(r.ok){const j=await r.json(),have=new Set(ks.map(x=>x.character));
+   for(const [c,v] of Object.entries(j)){if(!v.jlpt_new||have.has(c))continue;ks.push({character:c,level:'N'+v.jlpt_new,strokes:v.strokes,meanings:v.meanings||[],onyomi:(v.readings_on||[]).map(toK),kunyomi:v.readings_kun||[]})}}}catch(e){}
+ if(ks.length)data.kanji=ks;if(vv.length)data.vocab=vv;
+ dataMsg=(ks.length||vv.length)?`Data dimuat: ${ks.length} kanji, ${vv.length} kosakata.`:'Data online belum termuat — periksa internet.';render()}
+const WI={N5:'https://wkwkjapan.com/kosakata/daftar-kosakata-jlpt-n5/',N4:'https://wkwkjapan.com/kosakata/daftar-kosakata-jlpt-n4/',N3:'https://wkwkjapan.com/kosakata/daftar-kosakata-n3/'};
+const jina=async u=>{const r=await fetch('https://r.jina.ai/'+u);if(!r.ok)throw 0;return r.text()};
+const wl=md=>[...new Set([...md.matchAll(/\]\((https?:\/\/wkwkjapan\.com\/kosakata\/[^)#?\s]+)/g)].map(m=>m[1].replace(/\/$/,'')))];
+const cl=v=>String(v||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').replace(/^\s*\((.*?)\)\s*$/,'$1').trim();
+function wp(md,lv){const o=[];for(const l of md.split('\n')){const m=l.trim().match(/^\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|/);if(!m)continue;const w=cl(m[1]),r=cl(m[2]),t=cl(m[3]);
+ if(!w||!t||/^(bahasa jepang|japanese|kata|kanji wajib|bacaan)$/i.test(w)||/^[-: ]+$/.test(w)||/^(bahasa indonesia|indonesian)$/i.test(t)||!/[ぁ-ゖァ-ヺ一-龯々ー]/.test(w)||w.length>80||t.length>300)continue;o.push({word:w,reading:r,meanings:[t],level:lv,src:'wk'})}return o}
+async function loadWk(force){
+ if(!force){try{const c=JSON.parse(localStorage.getItem('jm_wkwk_vocab_v2')||'null');if(c&&c.length){wk=c.map(x=>({...x,src:'wk'}));wkMsg='WkwkJepang: '+wk.length+' kata (tersimpan).';render();return}}catch(e){}}
+ wk=[];
+ for(const lv of ['N5','N4','N3']){wkMsg='Memuat WkwkJepang '+lv+'...';render();
+  try{const q=[WI[lv]],seen=new Set(),out=[];
+   while(q.length&&seen.size<150){const u=q.shift().replace(/\/$/,'');if(seen.has(u))continue;seen.add(u);
+    try{const md=await jina(u);out.push(...wp(md,lv));for(const v of wl(md))if(!seen.has(v)&&q.length<400)q.push(v)}catch(e){}}
+   const s=new Set();wk.push(...out.filter(x=>{const k=x.word+'|'+x.reading+'|'+x.level;if(s.has(k))return false;s.add(k);return true}))}catch(e){}}
+ if(wk.length){try{localStorage.setItem('jm_wkwk_vocab_v2',JSON.stringify(wk))}catch(e){}wkMsg='WkwkJepang: '+wk.length+' kata.'}else wkMsg='WkwkJepang gagal dimuat — sementara memakai OpenJLPT.';
+ render()}
+const sV=()=>{const h=new Set(wk.map(x=>x.level));return [...wk,...data.vocab.filter(x=>!h.has(x.level))]};
+const kL=()=>data.kanji.filter(x=>x.level===level),vL=()=>data.vocab.filter(x=>x.level===level);
+const yomi=x=>'On: '+((x.onyomi||[]).join('、')||'—')+'\nKun: '+((x.kunyomi||[]).join('、')||'—');
+const stroke=c=>'https://cdn.jsdelivr.net/gh/KanjiVG/kanjivg@master/kanji/'+c.codePointAt(0).toString(16).padStart(5,'0')+'.svg';
+const kItem=x=>({id:x.character+'|'+x.level,t:'kanji',front:x.character,back:yomi(x),arti:mean(x),level:x.level});
+const vItem=x=>({id:x.word+'|'+(x.reading||'')+'|'+x.level,t:'vocab',front:x.word,back:x.reading||'',arti:mean(x),level:x.level});
+/* ---- Review per tanggal: tiap hari punya daftar sendiri, tidak digabung ---- */
+const RV=new Map(),inToday=id=>(st.rv[today()]||[]).some(x=>x.id===id);
+function rvBtn(it){RV.set(it.id,it);const on=inToday(it.id);
+ return `<button class="${on?'primary':''}" onclick="event.stopPropagation();rv('${encodeURIComponent(it.id).replace(/'/g,'%27')}',this)">${on?'⭐ Sudah di Review hari ini':'⭐ Masukkan ke Review hari ini'}</button>`}
+function rv(id,el){id=decodeURIComponent(id);const p=RV.get(id);if(!p)return;const d=today(),a=st.rv[d]||[],on=a.some(x=>x.id===id);
+ st.rv[d]=on?a.filter(x=>x.id!==id):[...a,{...p,known:null}];if(!st.rv[d].length)delete st.rv[d];save();
+ if(el){el.className=on?'':'primary';el.textContent=on?'⭐ Masukkan ke Review hari ini':'⭐ Sudah di Review hari ini'}}
+const br=s=>esc(s).replace(/\n/g,'<br>');
+let rvs=null,rvL='all';
+const rvAll=()=>{const o={};for(const d in st.rv){const a=st.rv[d].filter(x=>rvL==='all'||x.level===rvL);if(a.length)o[d]=a}return o};
+const bk=x=>x.back||(()=>{const k=data.kanji.find(k=>k.character===x.front);return k?yomi(k):''})();
+const rb=x=>br(bk(x))+(M==='id'&&x.arti?'<br><i>'+esc(x.arti)+'</i>':'');
+function review(a){
+ if(rvs){const q=rvs.items[rvs.pos];
+  a.innerHTML=`<div class="card fw"><div class="row"><span class="pill">📅 ${rvs.d}</span><span class="pill">${q.level}</span><span class="pill">${rvs.pos+1}/${rvs.items.length}</span></div><div class="card fcard" onclick="rvs.flip=!rvs.flip;render()">${rvs.flip?`<div class="fb"><b>${rb(q)}</b></div>`:`<div class="ff" style="font-size:${q.front.length>2?48:86}px">${esc(q.front)}</div>`}</div><div class="fcc"><button onclick="rAns(false)">❌ Belum hafal</button><button class="primary" onclick="rAns(true)">✅ Hafal</button></div><div class="fcc"><button onclick="rvs=null;render()">← Daftar review</button></div></div>`;return}
+ const g=rvAll(),ds=Object.keys(g).sort().reverse(),cnt=l=>Object.values(st.rv).flat().filter(x=>l==='all'||x.level===l).length;
+ a.innerHTML=`<div class="card"><h2>🔁 Review per Level &amp; Tanggal</h2><p class="muted">Pilih level (N). Di dalam tiap level, setiap tanggal punya daftar sendiri dan tidak digabung dengan tanggal lain.</p><div class="row">${['all',...LV].map(l=>`<button class="${rvL===l?'primary':''}" onclick="rvL='${l}';render()">${l==='all'?'Semua':l} (${cnt(l)})</button>`).join('')}</div><div class="fcc" style="justify-content:flex-start"><button class="primary" onclick="startR('')">▶ Review semua ${rvL==='all'?'level':rvL}</button><button onclick="expData('${rvL==='all'?'':rvL}')">⬇ Ekspor review ${rvL==='all'?'semua level':rvL}</button><button onclick="impM='merge';$('imp').click()">⬆ Impor review (gabung)</button><input id="imp" type="file" accept=".json,application/json" style="display:none" onchange="impData(this)"></div></div>`+(ds.map(d=>{const it=g[d];
+  return `<div class="card" style="margin-top:12px"><div class="row"><h3 style="margin-right:auto">📅 ${fmt(d)}${d===today()?' (hari ini)':''}</h3><span class="pill">${it.length} materi</span><span class="pill">✅ ${it.filter(x=>x.known===true).length}</span><button class="primary" onclick="startR('${d}')">▶ Review tanggal ini</button><button onclick="delR('${d}')">🗑 Hapus</button></div><div class="grid" style="margin-top:10px">${it.map(x=>`<div class="day"><b>${x.t==='kanji'?'🈴':x.t==='vocab'?'📚':'📖'} ${esc(x.front)}</b> <span class="pill">${x.level}</span> ${x.known===true?'✅':x.known===false?'❌':''}<br><span class="muted">${rb(x)}</span></div>`).join('')}</div></div>`}).join('')||'<div class="card" style="margin-top:12px"><p class="muted">Belum ada materi ⭐ untuk pilihan ini.</p></div>')}
+function startR(d){const g=rvAll(),it=d?(g[d]||[]):Object.values(g).flat();if(!it.length)return;rvs={d:d||('Semua '+(rvL==='all'?'level':rvL)),items:shuf(it),pos:0,flip:false};render()}
+function rAns(k){rvs.items[rvs.pos].known=k;save();if(rvs.pos<rvs.items.length-1){rvs.pos++;rvs.flip=false}else rvs=null;render()}
+function delR(d){if(!confirm('Hapus review tanggal '+d+(rvL==='all'?'':' untuk '+rvL)+'?'))return;st.rv[d]=st.rv[d].filter(x=>rvL!=='all'&&x.level!==rvL);if(!st.rv[d].length)delete st.rv[d];save();render()}
+/* ---- Navigasi ---- */
+const NAV=[['home','🏠 Beranda'],['kana','🔤 Kana'],['kanji','🈴 Kanji'],['vocab','📚 Daftar Kosakata'],['flashkanji','🃏 Flashcard Kanji'],['flashvocab','🃏 Flashcard Kosakata'],['quizkanji','📝 Soal Kanji'],['quizvocab','📝 Soal Kosakata'],['grammar','📖 Tata Bahasa'],['review','🔁 Review'],['tracker','📊 Perkembangan']];
+const go=p=>{page=p;render()};
+const lvSel=(fn='')=>`<select onchange="level=this.value;${fn}render()">${LV.map(x=>`<option ${x===level?'selected':''}>${x}</option>`).join('')}</select>`;
+const pager=(v,p,t)=>`<div class="fcc"><button onclick="${v}=Math.max(0,${v}-1);render()">← Sebelumnya</button><span class="muted" style="align-self:center">Halaman ${p+1}/${t}</span><button class="primary" onclick="${v}=Math.min(${t-1},${v}+1);render()">Berikutnya →</button></div>`;
+function render(){if(st.day!==today()){st.day=today();st.today=0;save()}
+ $('mode').innerHTML=[['id','🇮🇩 Mode Arti'],['jp','🇯🇵 Mode Jepang (tanpa arti)']].map(x=>`<button class="${M===x[0]?'active':''}" onclick="M='${x[0]}';st.mode=M;save();qz=null;fc.deck=[];render()">${x[1]}</button>`).join('');
+ $('nav').innerHTML=NAV.map(x=>`<button class="${page===x[0]?'active':''}" onclick="go('${x[0]}')">${x[1]}</button>`).join('');
+ const a=$('app');({home,kana,kanji,vocab,grammar,review,tracker,flashkanji:()=>flash(a,'kanji'),flashvocab:()=>flash(a,'vocab'),quizkanji:()=>quiz(a,'kanji'),quizvocab:()=>quiz(a,'vocab')}[page]||home)(a)}
+function home(a){const p=Math.min(100,Math.round(st.today/st.goal*100));
+ a.innerHTML=`<div class="grid"><div class="card"><h2>🎯 Target hari ini</h2><div class="stat">${st.today}/${st.goal}</div><div class="progress"><div class="bar" style="width:${p}%"></div></div><p>${p>=100?'Target tercapai 🔥':'Lanjutkan belajar.'}</p><button class="primary" onclick="go('quizvocab')">▶ Latihan Soal</button><button onclick="dataMsg='Memuat ulang...';render();loadOnline();loadWk(true)">↻ Muat Ulang Data</button></div><div class="card"><h2>🔥 Konsistensi</h2><div class="stat">${st.streak} hari</div></div><div class="card"><h2>📈 Akurasi</h2><div class="stat">${st.total?Math.round(st.correct/st.total*100):0}%</div><p>${st.correct} benar dari ${st.total}.</p></div></div><div class="card" style="margin-top:12px"><h2>Alur belajar</h2><p>① 🈴 Baca Kanji &amp; 📚 Kosakata → ② ✍️ Tulis di buku → ③ 🃏 Flashcard → ④ 📝 Soal bacaan → ⑤ ⭐ Review per tanggal → ⑥ Buat 1 kalimat sendiri.</p><p class="source">Sumber: 📘 WkwkJepang N5–N3 (belajar), 📝 OpenJLPT N5–N1 (soal; N2–N1 juga belajar), kanji dari OpenJLPT + kanji-data. Mode Arti menampilkan arti Indonesia; Mode Jepang tanpa arti. ${esc(wkMsg)} ${esc(dataMsg)}</p></div>`}
+const RO='a i u e o ka ki ku ke ko sa shi su se so ta chi tsu te to na ni nu ne no ha hi fu he ho ma mi mu me mo ya yu yo ra ri ru re ro wa wo n'.split(' '),HG=[...'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん'];
+function kana(a){const t=k=>`<div class="table">${HG.map((c,i)=>`<div class="kana"><b>${k?toK(c):c}</b><br><small>${RO[i]}</small></div>`).join('')}</div>`;
+ a.innerHTML=`<div class="card"><h2>🔤 Hiragana</h2>${t(0)}</div><div class="card" style="margin-top:12px"><h2>🔤 Katakana</h2>${t(1)}</div>`}
+let kp=0,KL=[];
+function kanji(a){const f=kL(),tp=Math.max(1,Math.ceil(f.length/60));kp=Math.min(kp,tp-1);KL=f.slice(kp*60,kp*60+60);
+ a.innerHTML=`<div class="card"><div class="row"><h2 style="margin-right:auto">🈴 Kanji ${level}</h2>${lvSel('kp=0;')}<span class="pill">${f.length} data</span></div><p class="muted">Klik Kanji untuk bacaan dan cara menulis. ${esc(dataMsg)}</p><div class="grid" style="margin-top:12px">${KL.map((x,i)=>`<button class="card" onclick="kd(${i})" style="text-align:center"><div class="big">${esc(x.character)}</div>${M==='id'?`<p><b>Arti:</b> ${esc(mean(x))}</p>`:''}<p><b>On:</b> ${esc((x.onyomi||[]).join('、')||'—')}<br><b>Kun:</b> ${esc((x.kunyomi||[]).join('、')||'—')}</p><small>Coretan: ${x.strokes??'—'}</small></button>`).join('')||'<p class="muted">Data belum termuat.</p>'}</div>${pager('kp',kp,tp)}</div>`;if(M==='id')lazyTr(KL)}
+function kd(i){const x=KL[i],m=document.createElement('div');m.style.cssText='position:fixed;inset:0;background:#0f172ab8;z-index:50;display:flex;align-items:center;justify-content:center;padding:16px';m.onclick=e=>{if(e.target===m)m.remove()};
+ m.innerHTML=`<div class="card" style="width:min(680px,96vw);max-height:92vh;overflow:auto;text-align:center"><button onclick="this.parentNode.parentNode.remove()">✕ Tutup</button><div class="big" style="font-size:110px">${esc(x.character)}</div><div class="row" style="justify-content:center"><span class="pill">${x.level}</span><span class="pill">${x.strokes??'—'} coretan</span></div>${M==='id'?`<p><b>Arti:</b> ${esc(mean(x))}</p>`:''}<p><b>Onyomi:</b> ${esc((x.onyomi||[]).join('、')||'—')}<br><b>Kunyomi:</b> ${esc((x.kunyomi||[]).join('、')||'—')}</p><h3>✍️ Tata cara penulisan</h3><img class="stroke" src="${stroke(x.character)}" alt="" onerror="this.outerHTML='<p class=warn>Diagram belum dapat dimuat.</p>'"><p class="ok">Ikuti angka 1 sampai ${x.strokes??'?'} pada diagram.</p><div class="fcc">${rvBtn(kItem(x))}</div></div>`;document.body.appendChild(m)}
+let vl='all',vq='',vp=0;
+function vocab(a){let f=(vs==='wk'?sV():data.vocab).filter(x=>vl==='all'||x.level===vl);const q=vq.trim().toLowerCase();
+ if(q)f=f.filter(x=>(x.word+' '+(x.reading||'')+(M==='id'?' '+mean(x):'')).toLowerCase().includes(q));
+ const tp=Math.max(1,Math.ceil(f.length/60));vp=Math.min(vp,tp-1);const sh=f.slice(vp*60,vp*60+60);
+ a.innerHTML=`<div class="card"><div class="row"><h2 style="margin-right:auto">📚 Daftar Kosakata</h2><span class="pill">${f.length} data</span></div><p class="muted">📘 <b>WkwkJepang = sumber belajar N5–N3 (N2–N1 memakai OpenJLPT).</b> 📝 <b>OpenJLPT = bank soal.</b> ${esc(wkMsg)} ${esc(dataMsg)}</p><div class="row" style="margin-top:10px"><button class="${vs==='wk'?'primary':''}" onclick="vs='wk';vp=0;render()">📘 Belajar</button><button class="${vs==='oj'?'primary':''}" onclick="vs='oj';vp=0;render()">📝 OpenJLPT</button><button onclick="loadWk(true)">↻ Muat Ulang Wkwk</button></div><div class="row" style="margin-top:10px"><select onchange="vl=this.value;vp=0;render()">${['all',...LV].map(x=>`<option value="${x}" ${x===vl?'selected':''}>${x==='all'?'Semua Level (N5–N1)':x}</option>`).join('')}</select><input id="vq" value="${esc(vq)}" placeholder="Cari kosakata atau bacaan..." style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter'){vq=this.value;vp=0;render()}"><button onclick="vq=$('vq').value;vp=0;render()">🔎 Cari</button></div><div class="grid" style="margin-top:12px">${sh.map(x=>`<div class="card"><div class="row"><h2 style="margin-right:auto">${esc(x.word)}</h2><span class="pill">${x.level}</span></div><p class="ja">${esc(x.reading||'—')}</p>${M==='id'?`<p><b>Arti:</b> ${esc(mean(x))}</p>`:''}<div class="fcc">${rvBtn(vItem(x))}</div></div>`).join('')||'<p class="muted">Tidak ditemukan / belum termuat.</p>'}</div>${pager('vp',vp,tp)}</div>`;if(M==='id')lazyTr(sh)}
+let fc={t:'',lv:'',deck:[],i:0,flip:false};
+function flash(a,t){const T=t==='kanji'?'Kanji':'Kosakata';
+ if(fc.t!==t||fc.lv!==level||!fc.deck.length)fc={t,lv:level,deck:shuf(t==='kanji'?kL():sV().filter(x=>x.level===level)),i:0,flip:false};
+ const head=`<div class="row"><h2 style="margin-right:auto">🃏 Flashcard ${T}</h2>${lvSel('fc.deck=[];')}</div>`;
+ if(!fc.deck.length){a.innerHTML=`<div class="card">${head}<p>Data ${level} belum termuat. ${esc(dataMsg)} ${esc(wkMsg)}</p></div>`;return}
+ const x=fc.deck[fc.i],hint='<div class="muted">Klik kartu untuk melihat bacaan</div>';
+ const front=t==='kanji'?`<div><div class="ff">${esc(x.character)}</div>${hint}</div>`:`<div><div class="fword">${esc(x.word)}</div>${hint}</div>`;
+ const back=t==='kanji'?`<div class="fb" onclick="event.stopPropagation()"><b>${br(yomi(x))}</b>${M==='id'?'<br>'+esc(mean(x)):''}<br><small>Coretan: ${x.strokes??'—'}</small><br><img class="stroke" src="${stroke(x.character)}" alt="" onerror="this.outerHTML='<p class=warn>Diagram belum dapat dimuat.</p>'"><div class="fcc">${rvBtn(kItem(x))}</div></div>`:`<div class="fb" onclick="event.stopPropagation()"><span class="fword">${esc(x.reading||'—')}</span>${M==='id'?'<div><b>'+esc(mean(x))+'</b></div>':''}<div class="fcc">${rvBtn(vItem(x))}</div></div>`;
+ a.innerHTML=`<div class="card fw">${head}<p class="muted" style="text-align:center">Kartu ${fc.i+1} dari ${fc.deck.length}</p><div class="card fcard" onclick="fc.flip=!fc.flip;render()">${fc.flip?back:front}</div><div class="fcc"><button onclick="fc.i=Math.max(0,fc.i-1);fc.flip=false;render()">← Sebelumnya</button><button class="primary" onclick="fc.flip=!fc.flip;render()">🔄 Balik</button><button onclick="fc.i=Math.min(fc.deck.length-1,fc.i+1);fc.flip=false;render()">Berikutnya →</button><button onclick="fc.deck=shuf(fc.deck);fc.i=0;fc.flip=false;render()">🔀 Acak</button></div></div>`;if(M==='id')lazyTr([x])}
+/* ---- Soal bacaan (tanpa arti) ---- */
+let qz=null;
+function quiz(a,t){
+ if(!qz||qz.t!==t){qz=null;a.innerHTML=`<div class="card"><h2>📝 Soal ${t==='kanji'?'Kanji':'Kosakata'} ${M==='id'?'(arti)':'(bacaan, tanpa arti)'}</h2><p>${M==='id'?'Pilih arti yang benar (Bahasa Indonesia).':'Pilih cara baca yang benar. Semua dalam bahasa Jepang.'}</p><div class="row">${lvSel()}<select id="qn"><option>10</option><option>20</option><option>30</option></select></div><p class="muted">${esc(dataMsg)}</p><button class="primary" onclick="startQ('${t}')">▶ Mulai</button></div>`;return}
+ const q=qz.items[qz.pos];
+ a.innerHTML=`<div class="card"><div class="row"><span class="pill">${t==='kanji'?'Kanji':'Kosakata'} ${level}</span><span class="pill">Soal ${qz.pos+1}/${qz.items.length}</span><b style="margin-left:auto">Skor ${qz.score}</b></div><div class="progress" style="margin:12px 0"><div class="bar" style="width:${Math.round(qz.pos/qz.items.length*100)}%"></div></div><div class="${t==='kanji'?'big':'fword'}" style="text-align:center">${esc(q.q)}</div><h2 style="text-align:center">${qz.m==='id'?'Apa artinya?':'Bagaimana cara bacanya?'}</h2>${q.opts.map((o,i)=>`<button class="option" onclick="ans(${i})">${br(o)}</button>`).join('')}<div id="fb"></div></div>`}
+async function startQ(t){const id=M==='id';
+ const pool=t==='kanji'?kL().filter(x=>id||(x.onyomi||[]).length||(x.kunyomi||[]).length):vL().filter(x=>x.reading&&(id||/[一-龯]/.test(x.word)));
+ if(pool.length<4){alert('Data '+level+' belum cukup / belum termuat.');return}
+ const rd=x=>id?mean(x):(t==='kanji'?yomi(x):x.reading),p=shuf(pool).slice(0,Math.min(+$('qn').value,pool.length)),ex=shuf(pool.filter(x=>!p.includes(x))).slice(0,id?12:40);
+ if(id){const b=document.querySelector('#app .primary');if(b)b.textContent='Menyiapkan soal...';await trAll([...p,...ex])}
+ const items=p.map(x=>{const ans=rd(x),o=shuf([...new Set([...p,...ex].filter(y=>y!==x).map(rd).filter(v=>v&&v!==ans))]).slice(0,3);return{x,q:t==='kanji'?x.character:x.word,ans,opts:shuf([ans,...o])}});
+ qz={t,m:M,items,pos:0,score:0,done:false,start:Date.now()};render()}
+function ans(i){if(qz.done)return;qz.done=true;const q=qz.items[qz.pos],ok=q.opts[i]===q.ans,x=q.x,end=qz.pos===qz.items.length-1;
+ if(ok){qz.score++;st.correct++;st.today++}st.total++;save();
+ document.querySelectorAll('.option').forEach((b,n)=>{b.disabled=true;if(q.opts[n]===q.ans)b.classList.add('correct');if(n===i&&!ok)b.classList.add('wrong')});
+ $('fb').innerHTML=`<div class="${ok?'ok':'warn'}">${ok?'✅ Benar!':'❌ Belum tepat. Jawaban: <b>'+br(q.ans)+'</b>'}</div><div class="fcc">${rvBtn(qz.t==='kanji'?kItem(x):vItem(x))}</div><div class="fcc"><button class="primary" onclick="nextQ()">${end?'Selesai':'Soal Berikutnya →'}</button></div>`}
+function nextQ(){if(qz.pos<qz.items.length-1){qz.pos++;qz.done=false;render();return}
+ const s=qz,n=s.items.length,d=today();st.sessions++;st.days[d]=(st.days[d]||0)+s.score;
+ const ds=Object.keys(st.days).sort();let k=0,l=null;for(let i=ds.length-1;i>=0;i--){const c=new Date(ds[i]);if(!l){k=1;l=c}else if(Math.round((l-c)/864e5)===1){k++;l=c}else break}st.streak=k;save();qz=null;
+ $('app').innerHTML=`<div class="card fw" style="text-align:center"><div style="font-size:70px">📋</div><h2>Hasil ${s.t==='kanji'?'Soal Kanji':'Soal Kosakata'} ${level}</h2><div class="stat">${s.score}/${n}</div><p>Akurasi ${Math.round(s.score/n*100)}% • ${Math.max(1,Math.round((Date.now()-s.start)/60000))} menit</p><div class="fcc"><button class="primary" onclick="render()">🔁 Soal Lagi</button><button onclick="go('review')">🔁 Review</button><button onclick="go('tracker')">📊 Riwayat</button></div></div>`}
+const G=`N5|です|Nです|adalah|これは本です。|Ini adalah buku.
+N5|は|Nは～です|penanda topik|私は学生です。|Saya adalah pelajar.
+N5|を|NをV|penanda objek|本を読みます。|Saya membaca buku.
+N5|に (waktu)|waktuにV|pada waktu tertentu|七時に起きます。|Saya bangun pukul tujuh.
+N5|で (tempat)|tempatでV|di tempat aktivitas|学校で勉強します。|Saya belajar di sekolah.
+N5|へ|tempatへ行きます|menuju|日本へ行きます。|Saya pergi ke Jepang.
+N5|と|AとB|dan / bersama|友達と映画を見ます。|Saya menonton film bersama teman.
+N5|から・まで|AからBまで|dari ... sampai|九時から五時まで働きます。|Saya bekerja dari jam 9 sampai jam 5.
+N5|あります・います|Nがあります／います|ada|猫がいます。|Ada kucing.
+N5|たいです|Vます→Vたいです|ingin melakukan|日本へ行きたいです。|Saya ingin pergi ke Jepang.
+N5|ましょう|Vましょう|mari|一緒に勉強しましょう。|Mari belajar bersama.
+N5|ませんか|Vませんか|maukah|映画を見ませんか。|Maukah menonton film?
+N5|てください|Vてください|tolong|待ってください。|Tolong tunggu.
+N5|てもいいです|Vてもいいです|boleh|入ってもいいですか。|Bolehkah masuk?
+N5|てはいけません|Vてはいけません|tidak boleh|ここで写真を撮ってはいけません。|Tidak boleh mengambil foto di sini.
+N5|ています|Vています|sedang / keadaan berlangsung|今勉強しています。|Sekarang sedang belajar.
+N5|ないでください|Vないでください|tolong jangan|忘れないでください。|Tolong jangan lupa.
+N5|たことがあります|Vたことがあります|pernah|日本へ行ったことがあります。|Saya pernah pergi ke Jepang.
+N5|たり～たり|Vたり、Vたりします|melakukan hal seperti|本を読んだり、映画を見たりします。|Membaca buku, menonton film, dan sebagainya.
+N5|から|Sから|karena|忙しいですから、行きません。|Karena sibuk, saya tidak pergi.
+N5|なければなりません|Vなければなりません|harus|勉強しなければなりません。|Harus belajar.
+N5|まえに・あとで|Vるまえに／Vたあとで|sebelum / setelah|寝るまえに本を読みます。|Saya membaca buku sebelum tidur.
+N4|んです|Sんです／Sんですか|menjelaskan / meminta penjelasan|どうしたんですか。|Ada apa?
+N4|ながら|Vます＋ながら|sambil|音楽を聞きながら勉強します。|Saya belajar sambil mendengarkan musik.
+N4|たら|Vたら|kalau / setelah|時間があったら行きます。|Kalau ada waktu, saya pergi.
+N4|ても|Vても／Aくても|meskipun|雨が降っても行きます。|Walaupun hujan, saya pergi.
+N4|そうです (tampak)|Vます／A語幹＋そうです|kelihatannya|雨が降りそうです。|Kelihatannya akan hujan.
+N4|そうです (katanya)|普通形＋そうです|katanya|明日は雨だそうです。|Katanya besok hujan.
+N4|ようです|普通形＋ようです|sepertinya|誰もいないようです。|Sepertinya tidak ada siapa-siapa.
+N4|すぎます|Vます／A語幹＋すぎます|terlalu|食べすぎました。|Saya makan terlalu banyak.
+N4|やすい・にくい|Vます＋やすい／にくい|mudah / sulit dilakukan|この本は読みやすいです。|Buku ini mudah dibaca.
+N4|てみます|Vてみます|mencoba|食べてみてください。|Silakan coba makan.
+N4|てしまいます|Vてしまいます|terlanjur / tuntas|財布を忘れてしまいました。|Saya terlanjur meninggalkan dompet.
+N4|ておきます|Vておきます|melakukan lebih dulu|ホテルを予約しておきます。|Saya memesan hotel lebih dulu.
+N4|てあげる・くれる・もらう|Vてあげる／くれる／もらう|memberi/menerima jasa|友達が手伝ってくれました。|Teman membantu saya.
+N4|可能形|Vられる／Vえる|bisa melakukan|日本語が話せます。|Saya bisa berbicara bahasa Jepang.
+N4|ために|Vるために|untuk / demi|日本で働くために勉強します。|Saya belajar untuk bekerja di Jepang.
+N4|ように|Vる／Vないように|agar / supaya|忘れないようにメモします。|Saya mencatat agar tidak lupa.
+N4|ようになる|Vるようになる|menjadi bisa|話せるようになりました。|Saya sudah menjadi bisa berbicara.
+N4|かもしれません|普通形＋かもしれません|mungkin|明日は雨かもしれません。|Besok mungkin hujan.
+N4|はずです|普通形＋はずです|seharusnya|明日は晴れるはずです。|Besok seharusnya cerah.
+N4|のに|普通形＋のに|padahal|勉強したのに忘れました。|Padahal sudah belajar, saya lupa.
+N4|ので|普通形＋ので|karena (halus)|忙しいので後で電話します。|Karena sibuk, saya menelepon nanti.
+N4|ば|Vば／Aければ|jika|時間があれば行きます。|Kalau ada waktu, saya pergi.
+N4|受身形|Vられる|bentuk pasif|先生にほめられました。|Saya dipuji guru.
+N4|使役形|Vさせる|menyuruh / mengizinkan|子供に野菜を食べさせます。|Saya menyuruh anak makan sayur.
+N3|ばかり|Vたばかり|baru saja|日本へ来たばかりです。|Saya baru saja datang ke Jepang.
+N3|ところです|Vるところ／Vているところ／Vたところ|akan / sedang / baru saja|今、出かけるところです。|Sekarang saya akan berangkat.
+N3|ことにする|Vることにする|memutuskan|毎日走ることにしました。|Saya memutuskan berlari tiap hari.
+N3|ことになる|Vることになる|diputuskan / jadinya|来月、転勤することになりました。|Bulan depan saya akan dipindahtugaskan.
+N3|ようにする|Vるようにする|berusaha membiasakan|毎日勉強するようにしています。|Saya berusaha belajar setiap hari.
+N3|うちに|Vるうちに／Aいうちに|selagi|若いうちに旅行したいです。|Saya ingin bepergian selagi muda.
+N3|とおりに|Vるとおりに／Nのとおりに|sesuai dengan|先生が言ったとおりにやりました。|Saya melakukannya sesuai yang guru katakan.
+N3|わけです|普通形＋わけです|jadi wajar / berarti|だから疲れているわけです。|Makanya wajar dia lelah.
+N3|はずがない|普通形＋はずがない|tidak mungkin|彼が知っているはずがない。|Tidak mungkin dia tahu.
+N3|らしい|普通形／Nらしい|katanya / khas|彼は来ないらしいです。|Sepertinya dia tidak datang.
+N3|っぽい|Vます／N／A語幹＋っぽい|bersifat / cenderung|彼は忘れっぽいです。|Dia pelupa.
+N3|がち|Vます／N＋がち|cenderung (negatif)|冬は病気になりがちです。|Di musim dingin mudah sakit.
+N3|ば～ほど|Vばvるほど|makin ... makin ...|練習すればするほど上手になります。|Makin banyak berlatih, makin mahir.
+N3|ずに|Vない形＋ずに|tanpa melakukan|朝ご飯を食べずに出かけました。|Saya berangkat tanpa sarapan.
+N3|させられる|Vさせられる|terpaksa disuruh|先生に掃除をさせられました。|Saya disuruh guru membersihkan.
+N3|に対して|Nに対して|terhadap|お客様に対して失礼です。|Itu tidak sopan terhadap pelanggan.
+N3|によって|Nによって|tergantung / oleh|人によって考え方が違います。|Cara berpikir berbeda tergantung orang.
+N3|として|Nとして|sebagai|留学生として日本へ行きます。|Saya pergi ke Jepang sebagai pelajar asing.
+N3|際に|Vる／Nの＋際に|ketika (formal)|入国の際にパスポートを見せます。|Saat masuk negara, saya menunjukkan paspor.
+N3|たびに|Vる／Nの＋たびに|setiap kali|この歌を聞くたびに思い出します。|Setiap mendengar lagu ini, saya teringat.
+N3|だけでなく|普通形＋だけでなく|bukan hanya|彼は英語だけでなく日本語も話せます。|Dia bisa bahasa Jepang, bukan hanya Inggris.
+N3|ことがある|Vることがある|kadang-kadang|朝ご飯を食べないことがあります。|Kadang saya tidak sarapan.
+N2|わけではない|普通形＋わけではない|bukan berarti|嫌いなわけではありません。|Bukan berarti saya tidak suka.
+N2|ざるを得ない|Vない形(ない除く)＋ざるを得ない|terpaksa harus|行かざるを得ません。|Terpaksa harus pergi.
+N2|ほかない|Vるほかない|tak ada pilihan selain|待つほかありません。|Tidak ada pilihan selain menunggu.
+N2|に違いない|普通形＋に違いない|pasti / tak diragukan|彼は犯人に違いない。|Dia pasti pelakunya.
+N2|かねる|Vます＋かねる|sulit / tidak bisa (halus)|その意見には賛成しかねます。|Saya sulit menyetujui pendapat itu.
+N2|かねない|Vます＋かねない|bisa saja (buruk)|このままでは事故になりかねない。|Kalau begini bisa saja terjadi kecelakaan.
+N2|ものの|普通形＋ものの|memang ... tetapi|買ったものの、使っていません。|Memang sudah beli, tetapi tidak dipakai.
+N2|にわたって|Nにわたって|sepanjang / meliputi|三日間にわたって会議が行われた。|Rapat berlangsung selama tiga hari.
+N2|において|Nにおいて|di / dalam (formal)|東京において大会が開かれた。|Turnamen diadakan di Tokyo.
+N2|に関して|Nに関して|mengenai|環境問題に関して調べました。|Saya meneliti mengenai masalah lingkungan.
+N2|に基づいて|Nに基づいて|berdasarkan|事実に基づいて書きました。|Saya menulis berdasarkan fakta.
+N2|とともに|Nとともに／Vるとともに|bersama / seiring|年齢とともに体力が落ちる。|Seiring usia, stamina menurun.
+N2|につれて|Vる／Nにつれて|seiring dengan|時間がたつにつれて慣れました。|Seiring waktu, saya terbiasa.
+N2|に応じて|Nに応じて|sesuai dengan|収入に応じて税金を払います。|Membayar pajak sesuai pendapatan.
+N2|ばかりでなく|普通形＋ばかりでなく|bukan hanya ... tetapi juga|彼は歌ばかりでなく踊りも上手だ。|Dia pandai menyanyi dan juga menari.
+N2|ながらも|Vます／A＋ながらも|walaupun|狭いながらも便利な部屋です。|Walaupun sempit, kamarnya praktis.
+N2|つつある|Vます＋つつある|sedang (perubahan)|経済は回復しつつある。|Ekonomi sedang pulih.
+N2|てならない|Vて／Aくて＋ならない|tidak tertahankan|将来が心配でならない。|Saya sangat mengkhawatirkan masa depan.
+N2|に限らず|Nに限らず|tidak terbatas pada|日本に限らず、世界中で人気です。|Populer bukan hanya di Jepang tetapi di seluruh dunia.
+N2|はもちろん|Nはもちろん|apalagi / tentu saja|英語はもちろん、中国語も話せる。|Inggris tentu saja, Mandarin pun bisa.
+N2|次第|Vます＋次第／N次第|begitu / tergantung|準備ができ次第、始めます。|Begitu siap, kita mulai.
+N2|というより|A というより B|lebih tepat disebut|寒いというより痛いです。|Lebih tepat disebut sakit daripada dingin.
+N1|をものともせず|Nをものともせず|tanpa gentar|困難をものともせず進んだ。|Ia maju tanpa gentar menghadapi kesulitan.
+N1|ずにはいられない|Vない形＋ずにはいられない|tak bisa tidak|笑わずにはいられなかった。|Saya tak bisa tidak tertawa.
+N1|を余儀なくされる|Nを余儀なくされる|terpaksa harus|工場は閉鎖を余儀なくされた。|Pabrik terpaksa ditutup.
+N1|に至って|Nに至って／Vるに至って|sampai pada titik|問題が大きくなるに至って対策を考えた。|Baru setelah masalah membesar, langkahnya dipikirkan.
+N1|極まりない|Naなこと／Aいこと＋極まりない|sangat ... sekali|失礼極まりない態度だ。|Sikap yang sangat tidak sopan.
+N1|を禁じ得ない|Nを禁じ得ない|tak dapat menahan|彼の死に涙を禁じ得ない。|Saya tak dapat menahan air mata atas kematiannya.
+N1|ともなると|Nともなると|kalau sudah sampai tingkat|社長ともなると忙しい。|Kalau sudah jadi direktur, sibuk sekali.
+N1|をよそに|Nをよそに|tanpa menghiraukan|親の心配をよそに遊びに行った。|Ia pergi bermain tanpa menghiraukan kekhawatiran orang tua.
+N1|ならでは|Nならでは|khas hanya milik|これは京都ならではの味です。|Ini rasa khas Kyoto.
+N1|までもない|Vるまでもない|tak perlu sampai|説明するまでもない。|Tak perlu dijelaskan.
+N1|てやまない|Vてやまない|terus (perasaan)|皆様の幸せを願ってやみません。|Saya terus mendoakan kebahagiaan Anda semua.
+N1|ずじまい|Vない形＋ずじまい|akhirnya tidak jadi|結局、行かずじまいだった。|Akhirnya tidak jadi pergi.
+N1|はおろか|Nはおろか|apalagi / boro-boro|漢字はおろか、ひらがなも書けない。|Boro-boro kanji, hiragana pun tak bisa menulis.
+N1|をおいて|Nをおいて|selain / tak ada yang lain|彼をおいて適任者はいない。|Tak ada yang cocok selain dia.
+N1|を皮切りに|Nを皮切りに|dimulai dari|東京を皮切りに全国ツアーを行う。|Tur nasional dimulai dari Tokyo.
+N1|とあって|普通形＋とあって|karena (situasi istimewa)|連休とあって、道が混んでいる。|Karena libur panjang, jalanan macet.
+N1|かたわら|Vる／Nの＋かたわら|di samping pekerjaan utama|働くかたわら夜間学校に通う。|Di samping bekerja, ia sekolah malam.
+N1|いかんにかかわらず|Nのいかんにかかわらず|apa pun / tanpa memandang|理由のいかんにかかわらず、遅刻は禁止だ。|Apa pun alasannya, terlambat dilarang.
+N1|ながらに|Vます／Nながらに|dalam keadaan tetap|生まれながらに才能がある。|Ia berbakat sejak lahir.
+N1|がてら|Vます／N＋がてら|sekalian|散歩がてら買い物に行った。|Saya berbelanja sekalian jalan-jalan.
+N1|とはいえ|普通形＋とはいえ|meskipun begitu|春とはいえ、まだ寒い。|Meski sudah musim semi, masih dingin.
+N1|んがため|Vない形(ない除く)＋んがため|demi untuk|生きんがために働く。|Saya bekerja demi bertahan hidup.
+N5|か|～ですか|partikel tanya|これは何ですか。|Ini apa?
+N5|の|AのB|kepunyaan / hubungan|これは私の本です。|Ini buku saya.
+N5|も|Nも|juga|私も学生です。|Saya juga pelajar.
+N5|が (tetapi)|Sが、S|tetapi|難しいですが、おもしろいです。|Sulit, tetapi menarik.
+N5|好き・嫌い|Nが好きです／嫌いです|suka / tidak suka|日本語が好きです。|Saya suka bahasa Jepang.
+N5|ほしいです|Nがほしいです|ingin (benda)|新しいパソコンがほしいです。|Saya ingin komputer baru.
+N5|くらい・ぐらい|数量＋くらい|kira-kira|三時間ぐらい勉強します。|Saya belajar sekitar tiga jam.
+N5|ほうがいいです|Vたほうがいいです|sebaiknya|早く寝たほうがいいです。|Sebaiknya tidur lebih awal.
+N5|なくてもいいです|Vなくてもいいです|tidak perlu|来なくてもいいです。|Tidak perlu datang.
+N5|ことができます|Vることができます|bisa|日本語を話すことができます。|Bisa berbicara bahasa Jepang.
+N5|とき|Vるとき／Vたとき|ketika|日本へ行くとき、写真を撮ります。|Saat pergi ke Jepang, saya mengambil foto.
+N5|つもりです|Vるつもりです|berniat|来年日本へ行くつもりです。|Saya berniat pergi ke Jepang tahun depan.
+N5|と思います|Sと思います|saya pikir|日本語は難しいと思います。|Menurut saya bahasa Jepang sulit.
+N5|でしょう|Sでしょう|mungkin|明日は晴れるでしょう。|Besok mungkin cerah.
+N5|もう・まだ|もうVました／まだです|sudah / belum|もう食べました。|Saya sudah makan.
+N5|だけ|Nだけ|hanya|水だけ飲みます。|Saya hanya minum air.
+N5|しか～ない|Nしか～ない|hanya (negatif)|千円しかありません。|Saya hanya punya 1.000 yen.
+N5|より|AよりBのほうが|lebih ... daripada|車のほうが速いです。|Mobil lebih cepat.
+N4|んですが|Sんですが…|membuka topik halus|お願いがあるんですが。|Saya ada sedikit permintaan...
+N4|なら|Nなら／Sなら|kalau soal|日本へ行くなら京都へ行きたいです。|Kalau ke Jepang, saya ingin ke Kyoto.
+N4|し|Sし、Sし|dan lagi|安いし、おいしいです。|Murah dan juga enak.
+N4|みたいです|Nみたいです／Sみたいです|sepertinya|先生みたいです。|Seperti guru.
+N4|てあります|NがVてあります|sudah dilakukan (hasil)|本が置いてあります。|Buku sudah diletakkan.
+N4|なければいけません|Vなければいけません|harus|宿題をしなければいけません。|Harus mengerjakan PR.
+N4|なくても大丈夫です|Vなくても大丈夫です|tidak apa-apa tanpa|来なくても大丈夫です。|Tidak datang pun tidak apa-apa.
+N4|場合は|Vる／Nの＋場合は|dalam hal|雨の場合は中止します。|Jika hujan, acara dibatalkan.
+N4|ようにします|Vるようにします|berusaha membiasakan|毎日勉強するようにします。|Saya akan berusaha belajar setiap hari.
+N4|たらいいですか|Vたらいいですか|sebaiknya bagaimana|どうしたらいいですか。|Sebaiknya bagaimana?
+N4|でしょうか|Sでしょうか|tanya halus|駅はどこでしょうか。|Di mana stasiunnya?
+N4|と思っています|Sと思っています|sedang berpikir / berencana|日本へ行こうと思っています。|Saya berencana pergi ke Jepang.
+N4|について|Nについて|tentang|日本文化について勉強します。|Saya belajar tentang budaya Jepang.
+N4|によると|Nによると|menurut|天気予報によると雨です。|Menurut ramalan cuaca, hujan.
+N4|間に|Vている間に|selama|日本にいる間に京都へ行きたいです。|Selama di Jepang, saya ingin ke Kyoto.
+N4|てもらえませんか|Vてもらえませんか|bisakah ...?|手伝ってもらえませんか。|Bisakah Anda membantu?
+N4|自動詞・他動詞|自動詞／他動詞|kata kerja intransitif/transitif|ドアが開きました。|Pintunya terbuka.
+N3|ついでに|Vる／Nの＋ついでに|sekalian|買い物のついでに銀行へ寄った。|Sekalian berbelanja, saya mampir ke bank.
+N3|ほど|Vる／N＋ほど|sampai sejauh|死ぬほど疲れた。|Lelah setengah mati.
+N3|たところ|Vたところ|ketika dilakukan ternyata|電話したところ、留守だった。|Ketika menelepon, ternyata tidak ada.
+N3|だらけ|Nだらけ|penuh dengan (buruk)|部屋がごみだらけだ。|Kamar penuh sampah.
+N3|向け|Nむけ|ditujukan untuk|これは子供向けの本です。|Ini buku untuk anak-anak.
+N3|にとって|Nにとって|bagi|私にとって家族は大切です。|Bagi saya keluarga itu penting.
+N3|ということだ|普通形＋ということだ|katanya|来週は休みだということです。|Katanya minggu depan libur.
+N3|てほしい|Vてほしい|ingin (orang lain) melakukan|もっと早く来てほしい。|Saya ingin kamu datang lebih awal.
+N3|に比べて|Nに比べて|dibanding|去年に比べて暑い。|Lebih panas dibanding tahun lalu.
+N3|せいで|普通形＋せいで|gara-gara (buruk)|雨のせいで試合が中止になった。|Gara-gara hujan, pertandingan dibatalkan.
+N3|おかげで|普通形＋おかげで|berkat|先生のおかげで合格しました。|Berkat guru, saya lulus.
+N3|そうにない|Vます＋そうにない|sepertinya tidak akan|今日は終わりそうにない。|Sepertinya hari ini tidak akan selesai.
+N3|に決まっている|普通形＋に決まっている|pasti|彼が勝つに決まっている。|Pasti dia yang menang.
+N3|かどうか|普通形＋かどうか|apakah atau tidak|行けるかどうかわかりません。|Saya tidak tahu apakah bisa pergi.
+N3|ようがない|Vます＋ようがない|tidak ada cara|連絡のしようがない。|Tidak ada cara untuk menghubungi.
+N2|ばかりに|普通形＋ばかりに|hanya karena|油断したばかりに失敗した。|Hanya karena lengah, saya gagal.
+N2|だけに|普通形＋だけに|justru karena|プロだけに技術が高い。|Justru karena profesional, tekniknya tinggi.
+N2|からには|Vる／Vた＋からには|karena sudah|やるからには最後までやる。|Karena sudah memulai, saya lakukan sampai akhir.
+N2|上で|Vた／Nの＋上で|setelah / dalam hal|よく考えた上で決めます。|Saya putuskan setelah dipikirkan baik-baik.
+N2|わりに|普通形＋わりに|meskipun (tidak sebanding)|値段のわりに品質がいい。|Kualitasnya bagus untuk harganya.
+N2|あげく|Vた／Nの＋あげく|akhirnya setelah lama|悩んだあげく、断った。|Setelah lama bimbang, akhirnya menolak.
+N2|に沿って|Nに沿って|sesuai / menyusuri|計画に沿って進める。|Dijalankan sesuai rencana.
+N2|をめぐって|Nをめぐって|seputar|遺産をめぐって争う。|Bertengkar seputar warisan.
+N2|くせに|普通形＋くせに|padahal (mencela)|知っているくせに教えてくれない。|Padahal tahu, tidak mau memberi tahu.
+N2|っぱなし|Vます＋っぱなし|dibiarkan terus|窓を開けっぱなしにした。|Saya membiarkan jendela terbuka.
+N2|きる|Vます＋きる|sampai habis / tuntas|全部食べきれなかった。|Saya tidak bisa menghabiskan semuanya.
+N2|に過ぎない|普通形＋に過ぎない|hanyalah|それは噂に過ぎない。|Itu hanyalah rumor.
+N2|うえに|普通形＋うえに|selain itu|安いうえに、おいしい。|Sudah murah, enak pula.
+N2|ものだ|Vる／Aい＋ものだ|memang begitulah|子供は遊ぶものだ。|Anak-anak memang bermain.
+N2|に加えて|Nに加えて|selain / ditambah|給料に加えてボーナスも出た。|Selain gaji, bonus juga keluar.
+N1|ずにはおかない|Vない形＋ずにはおかない|pasti akan membuat|その映画は人を感動させずにはおかない。|Film itu pasti menyentuh orang.
+N1|たりとも|一＋助数詞＋たりとも|sekecil apa pun (tidak)|一円たりとも無駄にできない。|Satu yen pun tak boleh disia-siakan.
+N1|ときたら|Nときたら|kalau soal (keluhan)|うちの子ときたら宿題をしない。|Anak saya itu, tidak mengerjakan PR.
+N1|にたえない|Nにたえない|tak tertahankan|見るにたえない光景だった。|Pemandangan yang tak tertahankan dilihat.
+N1|ゆえに|Nゆえに／普通形＋ゆえに|oleh karena itu (formal)|貧しさゆえに学校へ行けなかった。|Karena miskin, ia tak bisa sekolah.
+N1|を踏まえて|Nを踏まえて|berdasarkan / mempertimbangkan|意見を踏まえて計画を直す。|Merevisi rencana berdasarkan masukan.
+N1|にもまして|Nにもまして|lebih dari|去年にもまして今年は暑い。|Tahun ini lebih panas dari tahun lalu.
+N1|とあれば|Nとあれば|kalau demi|子供のためとあれば何でもする。|Kalau demi anak, apa pun akan kulakukan.
+N1|なりに|普通形＋なりに|dengan caranya sendiri|私なりに頑張りました。|Saya berusaha dengan cara saya sendiri.
+N1|もさることながら|Nもさることながら|apalagi / tak kalah|実力もさることながら運も必要だ。|Kemampuan penting, keberuntungan pun perlu.
+N1|をもって|Nをもって|dengan / pada (formal)|本日をもって閉店します。|Toko ditutup mulai hari ini.
+N1|ならまだしも|Nならまだしも|kalau ... masih mending|子供ならまだしも大人がそれではだめだ。|Kalau anak-anak masih mending, orang dewasa tidak boleh begitu.
+N1|や否や|Vる＋や否や|begitu saja|家に着くや否や寝てしまった。|Begitu sampai rumah, langsung tidur.
+N1|そばから|Vる／Vた＋そばから|baru saja ... sudah|覚えるそばから忘れる。|Baru dihafal sudah lupa.
+N1|ずくめ|Nずくめ|serba / penuh|今日はいいことずくめだった。|Hari ini serba menyenangkan.`.split("\n").map(l=>l.split("|"));
+function grammar(a){const f=G.filter(x=>x[0]===level);
+ a.innerHTML=`<div class="card"><div class="row"><h2 style="margin-right:auto">📖 Tata Bahasa ${level}</h2>${lvSel()}<span class="pill">${f.length} pola</span></div><div class="grid" style="margin-top:12px">${f.map(x=>`<div class="card"><span class="pill">${x[0]}</span><h3>${x[1]}</h3><div class="formula">${x[2]}</div>${M==='id'?`<p><b>Arti:</b> ${x[3]}</p>`:''}<p class="ja">${x[4]}</p>${M==='id'?`<p class="muted">🇮🇩 ${x[5]}</p>`:''}<div class="fcc">${rvBtn({id:x[1]+'|'+x[0],t:'grammar',front:x[1],back:x[2]+'\n'+x[4],arti:x[3]+' — '+x[5],level:x[0]})}</div></div>`).join('')}</div></div>`}
+function tracker(a){const acc=st.total?Math.round(st.correct/st.total*100):0,ds=Object.entries(st.days).sort((x,y)=>y[0].localeCompare(x[0])).slice(0,14);
+ a.innerHTML=`<div class="grid"><div class="card"><h3>🔥 Konsistensi</h3><div class="stat">${st.streak} hari</div></div><div class="card"><h3>🎯 Target</h3><div class="stat">${st.today}/${st.goal}</div></div><div class="card"><h3>📈 Akurasi</h3><div class="stat">${acc}%</div></div><div class="card"><h3>📝 Sesi</h3><div class="stat">${st.sessions}</div></div></div><div class="card" style="margin-top:12px"><h2>⚙️ Target harian</h2><input type="number" min="1" max="100" value="${st.goal}" onchange="st.goal=Math.max(1,+this.value);save();render()"> soal benar/hari</div><div class="card" style="margin-top:12px"><h2>📅 Riwayat harian</h2>${ds.map(x=>`<div class="day"><b>${x[0]}</b> — ${x[1]} jawaban benar</div>`).join('')||'<p class="muted">Belum ada riwayat.</p>'}</div><div class="card" style="margin-top:12px"><h2>💾 Cadangan data</h2><p class="muted">Simpan semua ⭐ Review per tanggal, konsistensi, dan riwayat ke satu file. Gabung = menambah tanpa menghapus. Ganti = menimpa semua data. File cadangan dari aplikasi lama juga bisa diimpor.</p><div class="fcc" style="justify-content:flex-start"><button class="primary" onclick="expData('')">⬇ Ekspor Semua</button><button onclick="impM='merge';$('imp').click()">⬆ Impor &amp; Gabung</button><button onclick="impM='replace';$('imp').click()">⬆ Impor &amp; Ganti</button><input id="imp" type="file" accept=".json,application/json" style="display:none" onchange="impData(this)"></div></div>`}
+const DEF={total:0,correct:0,sessions:0,today:0,day:'',streak:0,goal:10,days:{},rv:{}};
+function norm(o){o={...o};o.rv=o.rv||{};
+ if(o.review){for(const t of ['kanji','vocab','grammar'])for(const x of(o.review[t]||[])){const d=x.markedDate||'tanpa-tanggal',ex=String(x.extra||'').replace(/<br>/g,'\n');
+  (o.rv[d]=o.rv[d]||[]).push(t==='vocab'?{id:x.id,t,front:x.front,back:ex,arti:x.back,level:x.level,known:null}:t==='kanji'?{id:x.id,t,front:x.front,back:'',arti:x.back,level:x.level,known:null}:{id:x.id,t,front:x.front,back:ex,arti:x.back,level:x.level,known:null})}
+  delete o.review}
+ return o}
+function mergeSt(a,b){b=norm(b);const o={...a,rv:{...a.rv},days:{...a.days}};
+ for(const d in b.rv){const cur=o.rv[d]=[...(o.rv[d]||[])];for(const x of b.rv[d])if(!cur.some(y=>y.id===x.id))cur.push(x)}
+ for(const d in (b.days||{}))o.days[d]=Math.max(o.days[d]||0,b.days[d]);
+ for(const k of ['total','correct','sessions','streak','goal'])o[k]=Math.max(o[k]||0,b[k]||0);return o}
+let impM='merge';
+function expData(lv){let o=st;if(lv){const rv={};for(const d in st.rv){const a=st.rv[d].filter(x=>x.level===lv);if(a.length)rv[d]=a}o={rv}}
+ const b=new Blob([JSON.stringify({app:'jpall',v:2,st:o,tr})],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=(lv?'review-'+lv:'cadangan-belajar')+'-'+today()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function impData(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(r.result);if(!j.st||typeof j.st!=='object')throw 0;
+  if(impM==='merge')st=mergeSt(st,j.st);else{if(!confirm('Semua data sekarang akan DIGANTI isi file. Lanjutkan?')){inp.value='';return}st={...DEF,...norm(j.st)}}
+  save();if(j.tr){Object.assign(tr,j.tr);try{localStorage.setItem('jm_tr',JSON.stringify(tr))}catch(e){}}alert('Impor berhasil.');location.reload()}catch(e){alert('File cadangan tidak valid.');inp.value=''}};r.readAsText(f)}
+if(!localStorage.getItem(KEY)){for(const k of ['jm_stable_v3','jm_jp_v1']){try{const o=JSON.parse(localStorage.getItem(k));if(o)st=mergeSt(st,o)}catch(e){}}save()}
+render();loadOnline();loadWk();
+</script></body></html>
